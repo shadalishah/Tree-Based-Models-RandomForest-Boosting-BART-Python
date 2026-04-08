@@ -1,0 +1,768 @@
+---
+title: "Tree-Based Methods"
+subtitle: "Chapter 8: ISLR2 Exercise Solutions"
+author: "Shad Ali Shah"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    code-fold: true
+    code-tools: true
+    code-summary: "Show code"
+    theme: cosmo
+    colorlinks: true
+    link-citations: true
+    df-print: kable
+    fig-cap-location: bottom
+    tbl-cap-location: top
+    crossref:
+      fig-title: "Figure"
+      tbl-title: "Table"
+      fig-prefix: "Fig."
+      tbl-prefix: "Table"
+execute:
+  echo: true
+  warning: false
+  message: false
+  error: true
+  cache: false
+  keep-going: true
+  fig-width: 6.5
+  fig-height: 4
+jupyter: python3
+---
+
+# Chapter 8
+
+```{python}
+import numpy as np
+import pandas as pd
+from matplotlib.pyplot import subplots
+from statsmodels.datasets import get_rdataset
+import sklearn.model_selection as skm
+from ISLP import load_data, confusion_table
+from ISLP.models import (ModelSpec as MS,summarize)
+from sklearn.tree import (DecisionTreeClassifier as DTC,DecisionTreeRegressor as DTR,
+                          plot_tree,
+                          export_text)
+from sklearn.metrics import (accuracy_score,log_loss)
+from sklearn.ensemble import (RandomForestRegressor as RF,GradientBoostingRegressor as GBR,
+                             GradientBoostingClassifier as GBC,
+                             BaggingClassifier as BC)
+from sklearn.linear_model import LinearRegression, Ridge, LogisticRegression 
+import statsmodels.api as sm
+from sklearn.neighbors import KNeighborsClassifier
+```
+
+## Exercise 7
+
+```{python}
+Boston=load_data("Boston")
+```
+
+```{python}
+model = MS(Boston.columns.drop('medv'), intercept=False)
+D = model.fit_transform(Boston)
+feature_names = list(D.columns)
+X = np.asarray(D)
+```
+
+```{python}
+#We preserve the same dimensions of the test set as the lab
+(X_train, X_test, y_train, y_test) = skm.train_test_split(X,Boston['medv'],test_size=0.5,
+                                                          random_state=30)
+```
+
+```{python}
+#We should vary the number of trees from 1 to 100 as the figure 8.10 did in the book
+k=0
+MSE=np.zeros((30,3))
+for t in range(10,600,20):
+    RF_Boston1=RF(max_features=1.0,n_estimators=t,random_state=30).fit(X_train,y_train)
+    RF_Boston2=RF(max_features=0.5,n_estimators=t,random_state=30).fit(X_train,y_train)
+    RF_Boston3=RF(max_features='sqrt',n_estimators=t,random_state=30).fit(X_train,y_train)
+    ypred1=RF_Boston1.predict(X_test)
+    ypred2=RF_Boston2.predict(X_test)
+    ypred3=RF_Boston3.predict(X_test)
+    MSE[k,0]=np.mean((y_test - ypred1)**2)
+    MSE[k,1]=np.mean((y_test - ypred2)**2)
+    MSE[k,2]=np.mean((y_test - ypred3)**2)
+    k+=1
+```
+
+```{python}
+plot_idx = np.arange(10,600,20)
+ax = subplots(figsize=(8,8))[1]
+ax.plot(plot_idx,MSE[:,0],'b',label='m=p')
+ax.plot(plot_idx,MSE[:,1],'r',label='m=p/2')
+ax.plot(plot_idx,MSE[:,2],'g',label='m=$\sqrt{p}$')
+ax.set_xlabel('Number of trees')
+ax.set_ylabel('Test MSE')
+ax.legend();
+```
+
+We notice that the test MSE is improved as the number of trees increases. Moreover, better results are obtained when the number of selected features is close to $\sqrt{p}$ and $p/2$
+
+## Exercise 8
+
+```{python}
+Carseats=load_data('Carseats')
+```
+
+```{python}
+model = MS(Carseats.columns.drop('Sales'), intercept=False)
+D = model.fit_transform(Carseats)
+feature_names = list(D.columns)
+X = np.asarray(D)
+```
+
+### (a)
+
+```{python}
+(X_train, X_test, y_train, y_test) = skm.train_test_split(X,Carseats['Sales'],test_size=0.5,
+                                                          random_state=30)
+```
+
+### (b)
+
+```{python}
+reg = DTR()
+result=reg.fit(X_train, y_train)
+ax = subplots(figsize=(12,12))[1]
+plot_tree(reg,feature_names=feature_names,ax=ax);
+```
+
+```{python}
+ypred=result.predict(X_test)
+MSE=np.mean((ypred-y_test)**2)
+MSE
+```
+
+```{python}
+result.get_depth()
+```
+
+The test MSE is 5.56.<br>
+We have let The depth of the regression tree to be automatically obtained untill all the nodes are pure. The depth is finally 13.
+
+### (c)
+
+```{python}
+ccp_path = reg.cost_complexity_pruning_path(X_train, y_train)
+kfold = skm.KFold(5,shuffle=True,random_state=35)
+grid = skm.GridSearchCV(reg,{'ccp_alpha': ccp_path.ccp_alphas},refit=True,cv=kfold,
+                        scoring='neg_mean_squared_error')
+G = grid.fit(X_train, y_train)
+```
+
+```{python}
+grid.best_estimator_.ccp_alpha
+```
+
+The best tuning $\alpha$ parameter obtained by corss-validation is 0.098
+
+```{python}
+best_model=grid.best_estimator_
+pruning_MSE=np.mean((y_test-best_model.predict(X_test))**2)
+pruning_MSE
+```
+
+The cost complexity pruning yiealds to a test MSE of approximately 5 which is better than the test MSE previously obtained on the full regression tree.
+
+### (d)
+
+```{python}
+bag_seats = RF(max_features=X_train.shape[1], random_state=36)
+bag_seats.fit(X_train, y_train)
+```
+
+```{python}
+bag_MSE=np.mean((y_test - bag_seats.predict(X_test))**2)
+bag_MSE
+```
+
+```{python}
+df=pd.DataFrame({'importance':bag_seats.feature_importances_},index=feature_names)
+df.sort_values(by='importance', ascending=False)
+```
+
+The test MSE is nearly halved after use of bagging. Moreover, the top 3 most important predictors of Sales are: Price, ShelveLoc and Income.
+
+### (e)
+
+```{python}
+#As for the previous exercise, we will change the number of features among p, p/2 and sqrt(p)
+RF_MSE=np.zeros((1,3))
+RF_seats1=RF(max_features=1.0,random_state=0).fit(X_train,y_train)
+RF_seats2=RF(max_features=0.5,random_state=0).fit(X_train,y_train)
+RF_seats3=RF(max_features='sqrt',random_state=0).fit(X_train,y_train)
+ypred1=RF_seats1.predict(X_test)
+ypred2=RF_seats2.predict(X_test)
+ypred3=RF_seats3.predict(X_test)
+RF_MSE[0,0]=np.mean((y_test - ypred1)**2)
+RF_MSE[0,1]=np.mean((y_test - ypred2)**2)
+RF_MSE[0,2]=np.mean((y_test - ypred3)**2)
+```
+
+```{python}
+RF_MSE
+```
+
+The best obaitned test MSE with random forests is around 2.60 which is practically the same for bagging.<br>
+Changing m has resulted in the change of test MSE form 2.60 to 3.05. 
+
+```{python}
+df=pd.DataFrame({'importance':RF_seats1.feature_importances_},index=feature_names)
+df.sort_values(by='importance', ascending=False)
+```
+
+As for the previous question, the most important features in Sales prediction are: Price, ShelveLoc and Income.
+
+### (f)
+
+```{python}
+#Import BART from ISLP library
+from ISLP.bart import BART
+```
+
+```{python}
+bart_seats = BART(random_state=0, burnin=5, ndraw=15)
+bart_seats.fit(X_train, y_train)
+```
+
+```{python}
+yhat_test = bart_seats.predict(X_test.astype(np.float32))
+np.mean((y_test - yhat_test)**2)
+```
+
+The test MSE obtained with BART is 1.30, which is half of both random forests and bagging approaches.We can see then that BART is truly competitive.
+
+## Exercise 9
+
+```{python}
+oj=load_data("OJ")
+```
+
+```{python}
+oj.info()
+```
+
+```{python}
+oj.head()
+```
+
+```{python}
+#By simple conditionning below we check that STORE contains dummy varaibles of the Store7 feature
+# By displaying the data set we suspect that whenever Store7=='Yes', STORE==0
+len(oj[((oj['Store7']=='Yes') & (oj['STORE']==1)) | ((oj['Store7']=='No') & (oj['STORE']==0))])
+```
+
+```{python}
+#We conclude from the previous line that STORE contains dummy variables of Store
+model = MS(oj.columns.drop(['Purchase','Store7']), intercept=False)
+D = model.fit_transform(oj)
+feature_names = list(D.columns)
+X = np.asarray(D)
+```
+
+### (a)
+
+```{python}
+(X_train, X_test, y_train, y_test) = skm.train_test_split(X,oj['Purchase'],train_size=800,
+                                                          random_state=0)
+```
+
+### (b)
+
+```{python}
+clf = DTC(criterion='entropy', random_state=0)
+result=clf.fit(X_train, y_train)
+```
+
+```{python}
+training_error=1-accuracy_score(y_train, clf.predict(X_train))
+training_error
+```
+
+The training error rate is 0.87%, which is very low. We suspect that model overfitted the data.
+
+### (c)
+
+```{python}
+ax = subplots(figsize=(12,12))[1]
+plot_tree(clf,feature_names=feature_names,ax=ax);
+```
+
+```{python}
+clf.tree_.n_leaves
+```
+
+Since we fitted the model using the maximal number of subtrees, the plot is hardly interpretable.<br>
+The number of terminal nodes is 171.
+
+### (d)
+
+```{python}
+print(export_text(clf,feature_names=feature_names,show_weights=True))
+```
+
+Let's take for instance the first terminal node shown in the previous output.<br>
+That node was classified as MM based on 2 votes over nil. It was obtained after splitting feature LoyalCH thrice, StoreID once and WeekofPurchase twice. Basically, it conveys that any Purchase for which $LoyalCH \le 0,04, \;  StoreID \le 2,50\;and\;  WeekofPurchase \le 267,50$ is classified as $MM$.
+
+### (e)
+
+```{python}
+confusion = confusion_table(clf.predict(X_test),y_test)
+confusion
+```
+
+```{python}
+test_error=(confusion.iloc[0,1]+confusion.iloc[1,0])/np.sum(confusion.values)
+test_error
+```
+
+The test error is 22,22%, which is way higher than training error. The suspected overfitting is confirmed, we should look for the optimal tree size.
+
+### (f)
+
+```{python}
+M=np.zeros(clf.get_depth())
+for i in range(1,clf.get_depth()+1):
+    clf1 = DTC(criterion='entropy', random_state=20,max_depth=i)
+    results1 = skm.cross_val_score(clf1,X_train,y_train,cv=10)#10-fold
+    M[i-1]=results1.mean()
+print('The optimal tree size is',M.argmax()+1)
+```
+
+### (g)
+
+```{python}
+fig,ax=subplots(figsize=(8,8))
+ax.plot(range(1,clf.get_depth()+1),1-M)
+ax.set_xlabel("Tree size")
+ax.set_ylabel("CV calssification error");
+```
+
+### (h)
+
+The best tree size is 3.
+
+### (i)
+
+```{python}
+clf_pruned=DTC(criterion='entropy', random_state=20,max_depth=M.argmax()+1)
+clf_pruned.fit(X_train,y_train)
+```
+
+```{python}
+ax = subplots(figsize=(12, 12))[1]
+plot_tree(clf_pruned,feature_names=feature_names,ax=ax);
+```
+
+### (j)
+
+```{python}
+training_error_pruned=1-accuracy_score(y_train, clf_pruned.predict(X_train))
+training_error_pruned
+```
+
+The training error is 17.75% way larger than the training error obtained with the full tree. This was expected as in question (b) there was overfit.
+
+### (k)
+
+```{python}
+test_error_pruned=1-accuracy_score(y_test,clf_pruned.predict(X_test))
+test_error_pruned
+```
+
+Now the test error is better (18,88%) than the test error obtained with the full tree (22,22%).
+
+## Exercise 10
+
+```{python}
+Hitters=load_data('Hitters')
+```
+
+```{python}
+Hitters.info()
+```
+
+```{python}
+Hitters=Hitters.dropna()
+```
+
+```{python}
+Hitters.head()
+```
+
+```{python}
+Hitters['League'].unique()
+```
+
+```{python}
+Hitters['Division'].unique()
+```
+
+```{python}
+Hitters['NewLeague'].unique()
+```
+
+### (a)
+
+```{python}
+Hitters['League']=np.where(Hitters['League']=='A',1,0)
+Hitters['Division']=np.where(Hitters['Division']=='E',1,0)
+Hitters['NewLeague']=np.where(Hitters['NewLeague']=='A',1,0)
+```
+
+```{python}
+Hitters['LogSalary']=np.log(Hitters['Salary'])
+```
+
+```{python}
+Hitters.head()
+```
+
+### (b)
+
+```{python}
+X=Hitters.drop(['Salary','LogSalary'],axis=1)
+y=Hitters['LogSalary']
+(X_train, X_test, y_train, y_test) = skm.train_test_split(X,y,train_size=200,
+                                                          random_state=1)
+```
+
+### (c)
+
+```{python}
+lambdagrid=np.linspace(0.001,0.04)#Typical values of lambda range between 0.001 and 0.01 according to
+# page 349 of the book. We chose 0.04 insetead of 0.01 to show the stabilization of training MSE
+training_mse=np.zeros(lambdagrid.shape[0])
+for i in range(lambdagrid.shape[0]):
+    boost_Hitters = GBR(n_estimators=1000,learning_rate=lambdagrid[i],random_state=3)
+    boost_Hitters.fit(X_train, y_train)
+    training_mse[i] = np.mean((y_train- boost_Hitters.predict(X_train))**2)
+```
+
+```{python}
+fig,ax=subplots(figsize=(10,10))
+ax.plot(lambdagrid,training_mse)
+ax.set_xlabel('$\lambda$')
+ax.set_ylabel('Training MSE');
+```
+
+### (d)
+
+```{python}
+test_mse=np.zeros(lambdagrid.shape[0])
+for i in range(lambdagrid.shape[0]):
+    boost_Hitters = GBR(n_estimators=1000,learning_rate=lambdagrid[i],random_state=3)
+    boost_Hitters.fit(X_train, y_train)
+    test_mse[i] = np.mean((y_test- boost_Hitters.predict(X_test))**2)
+```
+
+```{python}
+fig,ax=subplots(figsize=(10,10))
+ax.plot(lambdagrid,test_mse)
+ax.set_xlabel('$\lambda$')
+ax.set_ylabel('Test MSE');
+```
+
+### (e)
+
+```{python}
+#Multiple linear regression
+mlr_Hitters=LinearRegression().fit(X_train, y_train)
+mlr_testmse=np.mean((y_test- mlr_Hitters.predict(X_test))**2)
+```
+
+```{python}
+#Ridge regression
+ridge_Hitters=Ridge().fit(X_train,y_train)
+ridge_testmse=np.mean((y_test- ridge_Hitters.predict(X_test))**2)
+```
+
+```{python}
+# Display a barplot which places different test MSE next to each other
+model=['Multiple linear regression','Ridge','Boosting']
+df=pd.DataFrame({'Test Mse':[mlr_testmse,ridge_testmse,min(test_mse)]},index=model)
+df
+```
+
+The optimal test MSE obtained by boosting is half the test MSE obtained by both multiple linear regression and Ridge regression.
+
+### (f)
+
+```{python}
+# Before looking for the most important features we should first refit the boosting model with 
+# the optimal lambda value
+best_lmabda=lambdagrid[test_mse.argmin()]
+boost_Hitters_opt = GBR(n_estimators=1000,learning_rate=best_lmabda,random_state=10)
+boost_Hitters_opt.fit(X_train, y_train)
+```
+
+```{python}
+X_train.columns
+```
+
+```{python}
+feature_names=X_train.columns
+feature_imp = pd.DataFrame({'importance':boost_Hitters_opt.feature_importances_},index=feature_names)
+feature_imp.sort_values(by='importance', ascending=False)
+```
+
+The top 3 features by importance are: CAtBat, CHits and AtBat.
+
+### (g)
+
+```{python}
+bag_Hitters = RF(max_features=X_train.shape[1], random_state=10)
+bag_Hitters.fit(X_train, y_train)
+```
+
+```{python}
+bag_MSE=np.mean((y_test - bag_Hitters.predict(X_test))**2)
+bag_MSE
+```
+
+The test MSE obtained by bagging is 0.25, which slightly larger than the one obtained with boosting.
+
+## Exercise 11
+
+```{python}
+Caravan=load_data('Caravan')
+```
+
+```{python}
+Caravan.info()
+```
+
+### (a)
+
+```{python}
+model = MS(Caravan.columns.drop('Purchase'), intercept=False)
+D = model.fit_transform(Caravan)
+feature_names = list(D.columns)
+X = np.asarray(D)
+```
+
+```{python}
+y=Caravan['Purchase']
+(X_train, X_test, y_train, y_test) = skm.train_test_split(X,y,train_size=1000,random_state=1)
+```
+
+### (b)
+
+```{python}
+boost_Caravan = GBC(n_estimators=1000,learning_rate=0.01,random_state=3)
+boost_Caravan.fit(X_train, y_train)
+```
+
+```{python}
+feature_imp = pd.DataFrame({'importance':boost_Caravan.feature_importances_},index=feature_names)
+feature_imp.sort_values(by='importance', ascending=False)
+```
+
+The top 3 features by importance are: MGODOV, PPERSAUT and AFIETS.
+
+### (c)
+
+```{python}
+#Find post probabilites and define new classes according to the intructions
+ypred=boost_Caravan.predict_proba(X_test)
+```
+
+```{python}
+ypred=ypred[:,1]
+```
+
+```{python}
+ypred=np.where(ypred>0.2,'Yes','No')
+confusion_boost = confusion_table(y_test, ypred)
+```
+
+```{python}
+confusion_boost
+```
+
+```{python}
+49/(240+49)
+```
+
+Accordingly to the confusion table obtained by boosting there is 16.95% who truly purchased the product in comparison with those predicted to do so.
+
+```{python}
+#Fit logit
+(Caravan_train, Caravan_test) = skm.train_test_split(Caravan,train_size=1000,random_state=1)
+```
+
+```{python}
+design = MS(Caravan_train.columns.drop(['Purchase']),intercept=False)
+X_train_lk = design.fit_transform(Caravan_train)
+y_train_lk = Caravan_train.Purchase == 'Yes'
+glm = sm.GLM(y_train_lk,X_train_lk,family=sm.families.Binomial())
+results = glm.fit()
+```
+
+```{python}
+ypred_logit=np.where(results.predict(X_test)>0.2,'Yes','No')
+confusion_logit = confusion_table(y_test, ypred_logit)
+```
+
+```{python}
+confusion_logit
+```
+
+```{python}
+54/(54+235)
+```
+
+For the logit: 18.68% predicted to purchase actually purchased.
+
+```{python}
+# KNN
+knn = KNeighborsClassifier(n_neighbors=5).fit(X_train_lk, y_train_lk)
+knn_pred_prob = knn.predict_proba(X_test)[:,1]
+knn_pred=np.where(knn_pred_prob>0.2,'Yes','No')
+confusion_table(knn_pred, y_test)
+```
+
+```{python}
+36/(149+36)
+```
+
+For KNN: 19.46% predicted to purchase actually purchased. KNN is the best model in this case.
+
+## Exercise 12
+
+We choose to load Weekly data set in this exercise.
+
+```{python}
+#instructions: fit to boosting, bagging, RF and BART
+# look for test set performance using deviance
+# Compare with logistic regression and give the best model
+```
+
+```{python}
+Weekly=load_data('Weekly')
+```
+
+```{python}
+Weekly.info()
+```
+
+```{python}
+Weekly
+```
+
+```{python}
+# We will cpnsider Direction as the response and all other features as dependant variables
+model = MS(Weekly.columns.drop(['Direction','Today']), intercept=False)#We drop 'Today' feature too 
+# cause it is clearly correlated with Direction. Whenever Today is positive, Direction is up
+D = model.fit_transform(Weekly)
+feature_names = list(D.columns)
+X = np.asarray(D)
+```
+
+```{python}
+y=Weekly['Direction']
+(X_train, X_test, y_train, y_test) = skm.train_test_split(X,y,train_size=0.7,random_state=30)
+```
+
+```{python}
+#Boosting
+boost_Weekly = GBC(n_estimators=1000,learning_rate=0.001,random_state=1,max_depth=1)
+boost_Weekly.fit(X_train, y_train)
+```
+
+```{python}
+ypred = boost_Weekly.predict(X_test)
+```
+
+```{python}
+confusion_boost=confusion_table(y_test,ypred)
+```
+
+```{python}
+confusion_boost
+```
+
+```{python}
+142/np.sum(np.sum(confusion_boost))
+```
+
+We obtain a test error of 43.42%
+
+```{python}
+#Bagging
+bag_weekly = RF(max_features=X_train.shape[1], random_state=1)
+y_train=np.where(y_train=='Up',1,0)
+bag_weekly.fit(X_train, y_train)
+```
+
+```{python}
+ypred = bag_weekly.predict(X_test)
+y_pred=np.where(ypred>0.5,'Up','Down')
+confusion_bagging=confusion_table(y_test,y_pred)
+```
+
+```{python}
+confusion_bagging
+```
+
+```{python}
+(60+84)/np.sum(np.sum(confusion_bagging))
+```
+
+Bagging yileds to a classification error of 44%.
+
+```{python}
+#Random forests with sqrt features supposed to be optimal
+RF_weekly=RF(max_features='sqrt',random_state=30).fit(X_train,y_train)
+```
+
+```{python}
+ypred = RF_weekly.predict(X_test)
+y_pred=np.where(ypred>0.5,'Up','Down')
+confusion_RF=confusion_table(y_test,y_pred)
+```
+
+```{python}
+confusion_RF
+```
+
+```{python}
+(88+59)/np.sum(np.sum(confusion_RF))
+```
+
+Random forests yiled to a classification error of 45%.
+
+```{python}
+#Logistic regression
+glm = sm.GLM(y_train,X_train,family=sm.families.Binomial())
+results = glm.fit()
+```
+
+```{python}
+ypred = results.predict(X_test)
+y_pred=np.where(ypred>0.5,'Up','Down')
+confusion_logit=confusion_table(y_test,y_pred)
+```
+
+```{python}
+confusion_logit
+```
+
+```{python}
+(18+121)/np.sum(np.sum(confusion_logit))
+```
+
+Logistic regression yields to a classification error of 42.5%. Thus, it is the most performant model in this case. But overall, models have nearly the same performance.
+
+```{python}
+
+```
